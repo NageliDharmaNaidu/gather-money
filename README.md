@@ -25,6 +25,14 @@ Phone login sends a verification code through Twilio. Configure a Twilio account
 
 The `.env` file and `data/gather.sqlite` are private local files and are excluded from Git. Never put credentials in browser code or share a Twilio auth token. Google and SMS setup require accounts and credentials from those providers; Gather cannot create those credentials itself.
 
-## Use from other devices
+## Publish on the web
 
-The current SQLite database is local to the machine running the server. To use the same accounts and records across devices, host this app and its database on a private server with HTTPS, set `HOST=0.0.0.0`, `NODE_ENV=production`, and `PUBLIC_BASE_URL` to the site's HTTPS origin, then register the matching Google callback URL with Google.
+The included `render.yaml` deploys Gather as a public Render web service and mounts SQLite on a persistent disk so accounts and records survive restarts and deploys. This configuration uses Render's paid web service and 1 GB disk; Render charges for these resources. Free Render web services do not support persistent disks, so they are not suitable for this SQLite database.
+
+1. Push this project to a GitHub repository.
+2. Sign in at [Render](https://render.com), choose **New → Blueprint**, and connect the repository.
+3. Review the service and disk costs in Render, then create the service. Render will provide an HTTPS `onrender.com` address that opens on phones and computers.
+4. Use that URL to sign up. Your account and money records are saved on the persistent database disk.
+
+Google sign-in and SMS sign-in remain optional and require provider credentials in Render's environment settings. For Google, set `PUBLIC_BASE_URL` to the Render HTTPS address and add `<PUBLIC_BASE_URL>/api/auth/google/callback` as the OAuth redirect URL in Google Cloud Console. Add the client ID and secret to Render, never to GitHub.
+

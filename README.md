@@ -29,7 +29,7 @@ The `.env` file and `data/gather.sqlite` are private local files and are exclude
 
 The included `render.yaml` deploys a public Node web service on Render's Free plan. For durable account and bill data, Gather uses a separate free PostgreSQL database on Neon. Render's free web services sleep after 15 minutes without traffic and can take about a minute to wake. Neon Free currently includes 1 GB of database storage and 100 compute-unit hours per month; the database scales to zero when idle. These free plans have usage limits and are intended for small hobby projects.
 
-1. Create a PostgreSQL project on [Neon](https://neon.com) using its Free plan. In the connection details, copy the pooled connection string and keep it private.
+1. Create a PostgreSQL project on [Neon](https://neon.com) using its Free plan and choose the Singapore region. In the connection details, copy the pooled connection string and keep it private. The Render service is configured for Singapore too.
 2. Sign in to [Render](https://render.com), choose **New → Blueprint**, and connect this GitHub repository.
 3. When Render asks for `DATABASE_URL`, paste the Neon connection string. Do not put it in GitHub or in browser code.
 4. Create the Blueprint. Render will build the app and provide an HTTPS `onrender.com` URL. Open it on a phone or computer, then use **Sign in → Sign up**.

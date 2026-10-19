@@ -131,6 +131,14 @@ async function handleApi(req, res, url) {
     const splitRows = db.prepare('SELECT id,name,total,created_at AS created,qr_data_url AS qr,people_json FROM splits WHERE user_id=? ORDER BY created_at DESC').all(user.id).map(row => ({ id: row.id, name: row.name, total: row.total, created: row.created, qr: row.qr, people: JSON.parse(row.people_json) }));
     return sendJson(res, 200, { loans: loanRows, splits: splitRows });
   }
+  const deleteRecord = url.pathname.match(/^\/api\/data\/(loans|splits)\/([^/]+)$/);
+  if (req.method === 'DELETE' && deleteRecord) {
+    const user = authRequired(req, res); if (!user) return;
+    let id; try { id = decodeURIComponent(deleteRecord[2]); } catch { return sendError(res, 400, 'Invalid record id.'); }
+    const table = deleteRecord[1] === 'loans' ? 'loans' : 'splits';
+    db.prepare(`DELETE FROM ${table} WHERE user_id=? AND id=?`).run(user.id, id);
+    return sendJson(res, 200, { ok: true });
+  }
   if (req.method === 'POST' && url.pathname === '/api/data/sync') {
     const user = authRequired(req, res); if (!user) return;
     const body = await readBody(req); const loans = Array.isArray(body.loans) ? body.loans : []; const splits = Array.isArray(body.splits) ? body.splits : [];

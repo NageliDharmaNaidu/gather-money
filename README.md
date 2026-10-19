@@ -1,6 +1,6 @@
 # Gather setup
 
-Gather stores accounts and money records in a SQLite database at `data/gather.sqlite`. It uses Node.js built-in modules, so no package install is required.
+Gather stores accounts and money records in SQLite locally (`data/gather.sqlite`) and uses PostgreSQL when `DATABASE_URL` is configured. The production setup uses a persistent hosted database so deployments and idle restarts do not erase records.
 
 ## Start the app
 
@@ -25,14 +25,16 @@ Phone login sends a verification code through Twilio. Configure a Twilio account
 
 The `.env` file and `data/gather.sqlite` are private local files and are excluded from Git. Never put credentials in browser code or share a Twilio auth token. Google and SMS setup require accounts and credentials from those providers; Gather cannot create those credentials itself.
 
-## Publish on the web
+## Publish on the web for free
 
-The included `render.yaml` deploys Gather as a public Render web service and mounts SQLite on a persistent disk so accounts and records survive restarts and deploys. This configuration uses Render's paid web service and 1 GB disk; Render charges for these resources. Free Render web services do not support persistent disks, so they are not suitable for this SQLite database.
+The included `render.yaml` deploys a public Node web service on Render's Free plan. For durable account and bill data, Gather uses a separate free PostgreSQL database on Neon. Render's free web services sleep after 15 minutes without traffic and can take about a minute to wake. Neon Free currently includes 1 GB of database storage and 100 compute-unit hours per month; the database scales to zero when idle. These free plans have usage limits and are intended for small hobby projects.
 
-1. Push this project to a GitHub repository.
-2. Sign in at [Render](https://render.com), choose **New → Blueprint**, and connect the repository.
-3. Review the service and disk costs in Render, then create the service. Render will provide an HTTPS `onrender.com` address that opens on phones and computers.
-4. Use that URL to sign up. Your account and money records are saved on the persistent database disk.
+1. Create a PostgreSQL project on [Neon](https://neon.com) using its Free plan. In the connection details, copy the pooled connection string and keep it private.
+2. Sign in to [Render](https://render.com), choose **New → Blueprint**, and connect this GitHub repository.
+3. When Render asks for `DATABASE_URL`, paste the Neon connection string. Do not put it in GitHub or in browser code.
+4. Create the Blueprint. Render will build the app and provide an HTTPS `onrender.com` URL. Open it on a phone or computer, then use **Sign in → Sign up**.
 
-Google sign-in and SMS sign-in remain optional and require provider credentials in Render's environment settings. For Google, set `PUBLIC_BASE_URL` to the Render HTTPS address and add `<PUBLIC_BASE_URL>/api/auth/google/callback` as the OAuth redirect URL in Google Cloud Console. Add the client ID and secret to Render, never to GitHub.
+The service refuses to start in production if `DATABASE_URL` is missing, so it cannot silently store production accounts on Render's temporary filesystem. Local development keeps using SQLite when `DATABASE_URL` is blank.
+
+Email/password sign-in works without additional providers. Google sign-in and SMS sign-in remain optional and require separate provider credentials in Render's environment settings. For Google, set `PUBLIC_BASE_URL` to the Render HTTPS URL and add `<PUBLIC_BASE_URL>/api/auth/google/callback` as the OAuth redirect URL in Google Cloud Console. Never commit provider secrets to GitHub.
 

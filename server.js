@@ -310,8 +310,15 @@ const server = http.createServer(async (req, res) => {
 initializeDatabase().then(() => {
   server.listen(PORT, process.env.HOST || '0.0.0.0', () => console.log(`Gather is listening on port ${PORT} using ${pgPool ? 'PostgreSQL' : 'SQLite'}`));
 }).catch(error => { console.error('Could not initialize the database:', error); process.exitCode = 1; });
-process.on('SIGINT', async () => {
-  if (pgPool) await pgPool.end(); else sqliteDb?.close();
-  server.close(() => process.exit(0));
-});
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  server.close(async () => {
+    if (pgPool) await pgPool.end(); else sqliteDb?.close();
+    process.exit(0);
+  });
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 

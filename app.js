@@ -2,11 +2,14 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const money = value => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(Number(value) || 0);
 const safeRead = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
+const safeArrayRead = key => { const value = safeRead(key, []); return Array.isArray(value) ? value : []; };
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-let loans = safeRead('gather-loans', []);
-let splits = safeRead('gather-splits', []);
+let loans = safeArrayRead('gather-loans');
+let splits = safeArrayRead('gather-splits');
 let qrImage = '';
 let activeSplitId = null;
+let editingLoanId = null;
+let editingSplitId = null;
 let toastTimer;
 let currentUser = null;
 let remoteSaveTimer = null;
@@ -14,10 +17,27 @@ let appServerAvailable = false;
 let googleAvailable = false;
 
 function save() {
-  try { localStorage.setItem('gather-loans', JSON.stringify(loans)); localStorage.setItem('gather-splits', JSON.stringify(splits)); }
+  try { persistLocalRecords(); }
   catch { showToast('Browser storage is full. Try a smaller QR image.'); }
   renderDashboard();
   if (currentUser) { clearTimeout(remoteSaveTimer); remoteSaveTimer = setTimeout(syncToDatabase, 350); }
+}
+function recordStorageKeys(user = currentUser) {
+  return user ? { loans: `gather-user-${user.id}-loans`, splits: `gather-user-${user.id}-splits` } : { loans: 'gather-loans', splits: 'gather-splits' };
+}
+function readLocalRecords(user = currentUser) {
+  const keys = recordStorageKeys(user);
+  return { loans: safeArrayRead(keys.loans), splits: safeArrayRead(keys.splits) };
+}
+function persistLocalRecords() {
+  const keys = recordStorageKeys();
+  localStorage.setItem(keys.loans, JSON.stringify(loans));
+  localStorage.setItem(keys.splits, JSON.stringify(splits));
+}
+function mergeById(primary, secondary) {
+  const rows = new Map();
+  for (const row of [...secondary, ...primary]) if (row?.id) rows.set(String(row.id), row);
+  return [...rows.values()];
 }
 function showToast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 2600); }
 function localDateTime() { const now = new Date(); const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
@@ -38,6 +58,13 @@ function renderDashboard() {
   activity.innerHTML = entries.map(item => `<button class="dashboard-activity-row" data-activity-type="${item.type}" data-activity-id="${item.id}"><span class="quick-symbol ${item.type === 'lend' ? 'quick-lend' : 'quick-split'}">${item.type === 'lend' ? '↗' : '⌁'}</span><span class="record-main"><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.sub)}</small></span><span class="dash-row-amount">${money(item.amount)}<small>${escapeHtml(item.state)}</small></span><b>→</b></button>`).join('');
   activity.querySelectorAll('[data-activity-type="lend"]').forEach(button => button.addEventListener('click', () => setPage('lend')));
   activity.querySelectorAll('[data-activity-type="split"]').forEach(button => button.addEventListener('click', () => { const split = splits.find(item => item.id === button.dataset.activityId); setPage('split'); renderSplitResult(split); $('#split-result-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
+}
+async function deleteRemoteRecord(collection, id) {
+  if (!currentUser) return true;
+  clearTimeout(remoteSaveTimer);
+  if (!await syncToDatabase()) return false;
+  try { await api(`/api/data/${collection}/${encodeURIComponent(id)}`, { method: 'DELETE' }); return true; }
+  catch (error) { showToast(error.message); return false; }
 }
 function setPage(page) {
   const isSplit = page === 'split'; const isDashboard = page === 'dashboard';
@@ -65,28 +92,63 @@ function renderLoans() {
     list.innerHTML = '<div class="empty-record"><span class="empty-record-icon">↗</span><div><strong>No lending records yet</strong><p>When you lend someone money, add their name, amount, and date here.</p></div></div>';
     return;
   }
-  list.innerHTML = loans.map(item => `<article class="record-row"><span class="person-mark">${escapeHtml(initials(item.name))}</span><div class="record-main"><strong>${escapeHtml(item.name)}</strong><small>${new Date(item.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></div><div class="record-amount">${money(item.amount)}<small>${item.returned ? 'Returned' : 'Pending'}</small></div><button class="record-action ${item.returned ? 'returned' : ''}" data-return="${item.id}">${item.returned ? '✓ Returned' : 'Mark returned'}</button></article>`).join('');
+  list.innerHTML = loans.map(item => `<article class="record-row"><span class="person-mark">${escapeHtml(initials(item.name))}</span><div class="record-main"><strong>${escapeHtml(item.name)}</strong><small>${new Date(item.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></div><div class="record-amount">${money(item.amount)}<small>${item.returned ? 'Returned' : 'Pending'}</small></div><div class="record-actions"><button class="record-action ${item.returned ? 'returned' : ''}" data-return="${escapeHtml(item.id)}">${item.returned ? '✓ Returned' : 'Mark returned'}</button><button class="record-action edit" data-edit-loan="${escapeHtml(item.id)}">Edit</button><button class="record-action delete" data-delete-loan="${escapeHtml(item.id)}">Delete</button></div></article>`).join('');
   list.querySelectorAll('[data-return]').forEach(button => button.addEventListener('click', () => {
     const loan = loans.find(item => item.id === button.dataset.return); loan.returned = !loan.returned; save(); renderLoans(); showToast(loan.returned ? `Marked ${loan.name} as returned.` : `Moved ${loan.name} back to pending.`);
+  }));
+  list.querySelectorAll('[data-edit-loan]').forEach(button => button.addEventListener('click', () => editLoan(button.dataset.editLoan)));
+  list.querySelectorAll('[data-delete-loan]').forEach(button => button.addEventListener('click', async () => {
+    const loan = loans.find(item => item.id === button.dataset.deleteLoan); if (!loan || !window.confirm(`Delete the lending record for ${loan.name}?`)) return;
+    if (!await deleteRemoteRecord('loans', loan.id)) return;
+    loans = loans.filter(item => item.id !== loan.id); if (editingLoanId === loan.id) resetLoanForm(); save(); renderLoans(); showToast('Lending record deleted.');
   }));
 }
 
 $('#lend-datetime').value = localDateTime();
+function resetLoanForm() {
+  editingLoanId = null; $('#lend-form').reset(); $('#lend-datetime').value = localDateTime();
+  $('#save-loan-button').innerHTML = 'Save record <span>→</span>'; $('#cancel-loan-edit').hidden = true;
+}
+function editLoan(id) {
+  const loan = loans.find(item => item.id === id); if (!loan) return;
+  editingLoanId = loan.id; $('#person-name').value = loan.name; $('#lend-amount').value = loan.amount;
+  const date = new Date(loan.date); $('#lend-datetime').value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  $('#save-loan-button').innerHTML = 'Update record <span>→</span>'; $('#cancel-loan-edit').hidden = false;
+  setPage('lend'); $('#lend-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+$('#cancel-loan-edit').addEventListener('click', resetLoanForm);
 $('#lend-form').addEventListener('submit', event => {
   event.preventDefault();
   const name = $('#person-name').value.trim(); const amount = Number($('#lend-amount').value); const date = new Date($('#lend-datetime').value);
   if (!name || !Number.isFinite(amount) || amount <= 0 || Number.isNaN(date.getTime())) { showToast('Please enter a name, amount, and valid date and time.'); return; }
-  loans.unshift({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name, amount, date: date.toISOString(), returned: false });
-  save(); renderLoans(); event.target.reset(); $('#lend-datetime').value = localDateTime(); showToast(`Saved ${money(amount)} lent to ${name}.`);
+  if (editingLoanId) {
+    const loan = loans.find(item => item.id === editingLoanId); if (loan) Object.assign(loan, { name, amount, date: date.toISOString() });
+  } else loans.unshift({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name, amount, date: date.toISOString(), returned: false });
+  const wasEditing = Boolean(editingLoanId); save(); renderLoans(); resetLoanForm(); showToast(`${wasEditing ? 'Updated' : 'Saved'} ${money(amount)} lent to ${name}.`);
 });
 
-function renderPeopleInputs(count, existing = []) {
+function renderPayerOptions(count, selectedIndex) {
+  const select = $('#split-payer-select'); const names = currentPeople();
+  if (selectedIndex === undefined) selectedIndex = select.value === '' ? -1 : Number(select.value);
+  select.innerHTML = '<option value="">Choose a person</option>' + Array.from({ length: count }, (_, index) => {
+    const person = names[index] || `Person ${index + 1}`;
+    return `<option value="${index}">${escapeHtml(person)}</option>`;
+  }).join('');
+  select.value = selectedIndex >= 0 && selectedIndex < count ? String(selectedIndex) : '';
+  if ($('#payer-in-group').checked && !select.value && count) select.value = '0';
+}
+function renderPeopleInputs(count, existing = [], payerIndex) {
   const container = $('#people-inputs');
+  if (payerIndex === undefined) {
+    const selectedPayer = $('#split-payer-select')?.value ?? '';
+    payerIndex = selectedPayer === '' ? -1 : Number(selectedPayer);
+  }
   container.innerHTML = Array.from({ length: count }, (_, index) => {
     const value = existing[index] ?? '';
     return `<label class="person-input-row"><span class="person-input-index">${index + 1}</span><input data-person-index="${index}" maxlength="40" value="${escapeHtml(value)}" placeholder="Person ${index + 1} (optional)" aria-label="Person ${index + 1} name, optional"></label>`;
   }).join('');
   $('#people-count-label').textContent = `${count} ${count === 1 ? 'person' : 'people'}`;
+  renderPayerOptions(count, payerIndex);
 }
 function currentPeople() { return $$('#people-inputs input').map(input => input.value.trim()); }
 function validCount(value) { const count = Math.floor(Number(value)); return Number.isFinite(count) ? Math.max(1, Math.min(100, count)) : 1; }
@@ -95,6 +157,11 @@ $('#people-count').addEventListener('change', event => {
 });
 $('#people-count').addEventListener('blur', event => {
   const oldNames = currentPeople(); const count = validCount(event.target.value); event.target.value = count; renderPeopleInputs(count, oldNames);
+});
+$('#people-inputs').addEventListener('input', () => renderPayerOptions(currentPeople().length, $('#split-payer-select').value === '' ? -1 : Number($('#split-payer-select').value)));
+$('#payer-in-group').addEventListener('change', event => {
+  $('#split-payer-select').disabled = !event.target.checked;
+  if (event.target.checked && !$('#split-payer-select').value) $('#split-payer-select').value = '0';
 });
 renderPeopleInputs(2);
 
@@ -145,9 +212,18 @@ function renderSplitResult(split) {
   $('#each-share').textContent = remainder ? `${money(baseShare / 100)}–${money((baseShare + 1) / 100)}` : money(baseShare / 100);
   $('#share-remainder').textContent = remainder ? `First ${remainder} ${remainder === 1 ? 'share gets' : 'shares get'} 1 paisa extra each to match the total.` : 'Everyone pays the same amount.';
   $('#paid-count').textContent = `${paid} of ${split.people.length} paid`;
-  $('#split-people-list').innerHTML = split.people.map(person => `<div class="split-person-row"><input class="paid-check" type="checkbox" data-paid="${person.id}" ${person.paid ? 'checked' : ''} aria-label="Mark ${escapeHtml(person.name)} as paid"><span class="person-mark">${escapeHtml(initials(person.name))}</span><div class="record-main"><strong>${escapeHtml(person.name)}</strong><small>${person.paid ? 'Paid' : 'Still to pay'}</small></div><div class="record-amount">${money(person.share)}<small>their share</small></div></div>`).join('');
+  $('#split-people-list').innerHTML = split.people.map(person => `<div class="split-person-row"><input class="paid-check" type="checkbox" data-paid="${escapeHtml(person.id)}" ${person.paid ? 'checked' : ''} ${person.isPayer ? 'disabled' : ''} aria-label="Mark ${escapeHtml(person.name)} as paid"><span class="person-mark">${escapeHtml(initials(person.name))}</span><div class="record-main"><strong>${escapeHtml(person.name)}</strong><small>${person.isPayer ? 'Bill payer · paid' : person.paid ? 'Paid' : 'Still to pay'}</small></div><div class="record-amount">${money(person.share)}<small>their share</small></div></div>`).join('');
   const qr = $('#result-qr-wrap');
   qr.innerHTML = split.qr ? `<img src="${split.qr}" alt="Payment QR code"><span><strong>Payment QR attached</strong><small>Friends can scan to pay you</small></span>` : '<span><strong>No payment QR attached</strong><small>You can add one to your next bill</small></span>';
+  const downloadQr = $('#download-qr');
+  if (split.qr) {
+    downloadQr.href = split.qr;
+    const mime = split.qr.match(/^data:(image\/[^;,]+)/i)?.[1] || 'image/png';
+    const extension = (mime.split('/')[1] || 'png').split('+')[0].replace(/[^a-z0-9]/gi, '') || 'png';
+    downloadQr.download = `${(split.name || 'gather-payment-qr').replace(/[^a-z0-9-_]+/gi, '-').slice(0, 40)}-qr.${extension === 'jpeg' ? 'jpg' : extension}`;
+    downloadQr.hidden = false;
+  }
+  else { downloadQr.removeAttribute('href'); downloadQr.hidden = true; }
   $('#split-people-list').querySelectorAll('[data-paid]').forEach(input => input.addEventListener('change', () => {
     const person = split.people.find(item => item.id === input.dataset.paid); person.paid = input.checked; save(); renderSplitResult(split); renderHistory(); showToast(`${person.name} marked ${person.paid ? 'paid' : 'unpaid'}.`);
   }));
@@ -156,9 +232,34 @@ function renderSplitResult(split) {
 function renderHistory() {
   const list = $('#split-history');
   if (!splits.length) { list.innerHTML = '<div class="empty-record"><span class="empty-record-icon">⌁</span><div><strong>No group bills yet</strong><p>Your created bill splits will appear here.</p></div></div>'; return; }
-  list.innerHTML = splits.map(split => { const paid = split.people.filter(person => person.paid).length; return `<div class="history-row"><span class="heading-symbol green">⌁</span><div class="record-main"><strong>${escapeHtml(split.name)}</strong><small>${split.people.length} ${split.people.length === 1 ? 'person' : 'people'} · ${new Date(split.created).toLocaleDateString()}</small></div><span class="history-progress">${paid}/${split.people.length} paid</span><button class="history-open" data-open-split="${split.id}">Open</button></div>`; }).join('');
+  list.innerHTML = splits.map(split => { const paid = split.people.filter(person => person.paid).length; return `<div class="history-row"><span class="heading-symbol green">⌁</span><div class="record-main"><strong>${escapeHtml(split.name)}</strong><small>${split.people.length} ${split.people.length === 1 ? 'person' : 'people'} · ${new Date(split.created).toLocaleDateString()}</small></div><span class="history-progress">${paid}/${split.people.length} paid</span><div class="record-actions"><button class="history-open" data-open-split="${escapeHtml(split.id)}">Open</button><button class="history-open" data-edit-split="${escapeHtml(split.id)}">Edit</button><button class="history-open delete" data-delete-split="${escapeHtml(split.id)}">Delete</button></div></div>`; }).join('');
   list.querySelectorAll('[data-open-split]').forEach(button => button.addEventListener('click', () => { const split = splits.find(item => item.id === button.dataset.openSplit); renderSplitResult(split); $('#split-result-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
+  list.querySelectorAll('[data-edit-split]').forEach(button => button.addEventListener('click', () => editSplit(button.dataset.editSplit)));
+  list.querySelectorAll('[data-delete-split]').forEach(button => button.addEventListener('click', async () => {
+    const split = splits.find(item => item.id === button.dataset.deleteSplit); if (!split || !window.confirm(`Delete the group bill “${split.name}”?`)) return;
+    if (!await deleteRemoteRecord('splits', split.id)) return;
+    splits = splits.filter(item => item.id !== split.id); if (editingSplitId === split.id) resetSplitForm();
+    if (activeSplitId === split.id) { activeSplitId = null; $('#split-result-card').hidden = true; }
+    save(); renderHistory(); renderDashboard(); showToast('Group bill deleted.');
+  }));
 }
+function resetSplitForm() {
+  editingSplitId = null; qrImage = ''; $('#split-form').reset(); $('#people-count').value = 2; renderPeopleInputs(2);
+  $('#payer-in-group').checked = false; $('#split-payer-select').disabled = true; $('#split-payer-select').value = '';
+  $('#qr-file-label').textContent = 'Add QR code'; $('#receipt-label').textContent = 'Upload file'; $('#receipt-status').textContent = '';
+  $('#save-split-button').innerHTML = 'Calculate split <span>→</span>'; $('#cancel-split-edit').hidden = true;
+}
+function editSplit(id) {
+  const split = splits.find(item => item.id === id); if (!split) return;
+  editingSplitId = split.id; $('#bill-name').value = split.name; $('#bill-total').value = split.total;
+  const payerIndex = split.people.findIndex(person => person.isPayer);
+  $('#payer-in-group').checked = payerIndex >= 0; $('#split-payer-select').disabled = payerIndex < 0;
+  $('#people-count').value = split.people.length; renderPeopleInputs(split.people.length, split.people.map(person => person.name), payerIndex);
+  qrImage = split.qr || ''; $('#qr-file-label').textContent = qrImage ? '✓ QR added' : 'Add QR code';
+  $('#save-split-button').innerHTML = 'Update split <span>→</span>'; $('#cancel-split-edit').hidden = false;
+  setPage('split'); $('#split-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+$('#cancel-split-edit').addEventListener('click', resetSplitForm);
 $('#split-form').addEventListener('submit', event => {
   event.preventDefault();
   const rawCount = $('#people-count').value;
@@ -166,15 +267,57 @@ $('#split-form').addEventListener('submit', event => {
   const count = validCount(rawCount); const names = currentPeople();
   if (names.length !== count) { showToast('Check the number of people in the split.'); return; }
   const total = Number($('#bill-total').value); if (!Number.isFinite(total) || total <= 0) { showToast('Enter a bill total greater than zero.'); return; }
-  const split = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name: $('#bill-name').value.trim(), total, created: new Date().toISOString(), qr: qrImage, people: names.map((name, index) => ({ id: `${Date.now()}-${index}`, name: name || `Person ${index + 1}`, paid: false })) };
-  splits.unshift(split); renderSplitResult(split); renderHistory(); showToast('Split calculated. Check off each person as they pay.');
+  const existing = editingSplitId ? splits.find(item => item.id === editingSplitId) : null;
+  const resolvedNames = names.map((name, index) => name || `Person ${index + 1}`);
+  const payerIndex = $('#payer-in-group').checked ? Number($('#split-payer-select').value) : -1;
+  if ($('#payer-in-group').checked && (!Number.isInteger(payerIndex) || payerIndex < 0 || payerIndex >= count)) { showToast('Choose who paid the bill.'); return; }
+  const oldPayerIndex = existing?.people.findIndex(person => person.isPayer) ?? -1;
+  const participantsChanged = !existing || existing.total !== total || existing.people.length !== resolvedNames.length || existing.people.some((person, index) => person.name !== resolvedNames[index]) || oldPayerIndex !== payerIndex;
+  const people = resolvedNames.map((name, index) => {
+    const previous = existing?.people[index];
+    const isPayer = payerIndex === index;
+    return { id: previous?.name === name ? previous.id : `${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`, name, paid: isPayer || (!participantsChanged && previous?.name === name ? Boolean(previous.paid) : false), ...(isPayer ? { isPayer: true } : {}) };
+  });
+  const split = existing
+    ? Object.assign(existing, { name: $('#bill-name').value.trim(), total, qr: qrImage, people })
+    : { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name: $('#bill-name').value.trim(), total, created: new Date().toISOString(), qr: qrImage, people };
+  if (!existing) splits.unshift(split);
+  renderSplitResult(split); renderHistory();
+  if (existing) resetSplitForm();
+  showToast(existing ? 'Group bill updated.' : 'Split calculated. Check off each person as they pay.');
 });
 $('#copy-split-summary').addEventListener('click', async () => {
   const split = splits.find(item => item.id === activeSplitId);
   if (!split) { showToast('Open a saved split to copy its details.'); return; }
   const details = split.people.map(person => `${person.name}: ${money(person.share)}`).join(' · ');
-  const message = `${split.name} — ${money(split.total)} total, split between ${split.people.length} people. ${details}.${split.qr ? ' Scan the payment QR I shared to pay.' : ''}`;
-  try { await navigator.clipboard.writeText(message); showToast('Split details copied.'); } catch { showToast(message); }
+  const message = `${split.name} — ${money(split.total)} total, split between ${split.people.length} people.\n${details}${split.qr ? '\nPayment QR attached.' : ''}`;
+  try { await navigator.clipboard.writeText(message); showToast(split.qr ? 'Details copied. Use Share bill to include the QR.' : 'Split details copied.'); } catch { showToast(message); }
+});
+$('#share-split').addEventListener('click', async () => {
+  const split = splits.find(item => item.id === activeSplitId);
+  if (!split) { showToast('Open a saved split before sharing it.'); return; }
+  const details = split.people.map(person => `${person.name}: ${money(person.share)}`).join('\n');
+  const text = `${split.name} — ${money(split.total)} total\n${details}`;
+  try {
+    if (navigator.share) {
+      const payload = { title: split.name || 'Gather group bill', text };
+      if (split.qr && typeof File !== 'undefined') {
+        const blob = await fetch(split.qr).then(response => response.blob());
+        const extension = blob.type.includes('jpeg') ? 'jpg' : blob.type.split('/')[1] || 'png';
+        const file = new File([blob], `gather-payment-qr.${extension}`, { type: blob.type || 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) payload.files = [file];
+      }
+      await navigator.share(payload);
+      showToast(split.qr && !payload.files ? 'Details shared. Download and attach the QR separately on this device.' : 'Split details shared.');
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    showToast(split.qr ? 'Details copied. Download the QR below to attach it.' : 'Split details copied.');
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    try { await navigator.clipboard.writeText(text); showToast(split.qr ? 'Details copied. Download the QR below to attach it.' : 'Split details copied.'); }
+    catch { showToast('Sharing is unavailable here. You can copy each amount from the checklist.'); }
+  }
 });
 
 function showBusinessModal() { $('#business-modal').hidden = false; }
@@ -184,7 +327,11 @@ $('#modal-done').addEventListener('click', () => $('#business-modal').hidden = t
 $('#business-modal').addEventListener('click', event => { if (event.target === $('#business-modal')) $('#business-modal').hidden = true; });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { $('#business-modal').hidden = true; $('#sidebar').classList.remove('open'); } });
 function authMessage(message, isError = false) { const el = $('#auth-message'); el.textContent = message; el.classList.toggle('error', isError); }
-function openAuth(message = '', isError = false) { $('#auth-shade').hidden = false; authMessage(message, isError); }
+function openAuth(message = '', isError = false) {
+  setAuthMode('signin'); setAuthMethod('email');
+  $('#otp-row').hidden = true; $('#auth-otp').value = ''; $('#phone-submit').innerHTML = 'Send verification code <span>→</span>';
+  $('#auth-shade').hidden = false; authMessage(message, isError);
+}
 function closeAuth() { $('#auth-shade').hidden = true; authMessage(''); }
 function setAuthMode(mode) {
   $$('.auth-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.authMode === mode));
@@ -215,30 +362,47 @@ function paintAccount() {
   button.textContent = currentUser ? 'Sign out' : 'Sign in';
   button.title = currentUser ? `Signed in as ${currentUser.email || currentUser.phone}. Click to sign out.` : 'Log in or create an account';
   $('#save-indicator').innerHTML = currentUser ? '<span></span> Synced to your account' : '<span></span> Saved on this device';
+  $('#split-storage-note').innerHTML = currentUser ? '<span>⌑</span> Your bill and payment list sync to your account.' : '<span>⌑</span> Your bill and payment list stay on this device.';
 }
 async function syncToDatabase() {
-  if (!currentUser) return;
-  try { await api('/api/data/sync', { method: 'POST', body: JSON.stringify({ loans, splits }) }); paintAccount(); }
-  catch (error) { $('#save-indicator').innerHTML = '<span class="offline-dot"></span> Sync paused'; showToast(error.message); }
+  if (!currentUser) return false;
+  try { await api('/api/data/sync', { method: 'POST', body: JSON.stringify({ loans, splits }) }); paintAccount(); return true; }
+  catch (error) { $('#save-indicator').innerHTML = '<span class="offline-dot"></span> Sync paused'; showToast(error.message); return false; }
 }
-async function loadAccountData() {
+async function loadAccountData({ offerGuestImport = false } = {}) {
   const remote = await api('/api/data');
-  if (!remote.loans.length && !remote.splits.length && (loans.length || splits.length)) {
-    await syncToDatabase();
-  } else {
-    loans = remote.loans; splits = remote.splits;
-    localStorage.setItem('gather-loans', JSON.stringify(loans)); localStorage.setItem('gather-splits', JSON.stringify(splits));
+  const accountCache = readLocalRecords(currentUser);
+  const guestCache = readLocalRecords(null);
+  const hasRows = rows => rows.loans.length > 0 || rows.splits.length > 0;
+  let selected = null; let shouldSync = false;
+  if (offerGuestImport && hasRows(guestCache)) {
+    const accountName = currentUser.email || currentUser.phone || 'this account';
+    if (window.confirm(`This browser has unsynced lending records or group bills. Copy them into ${accountName}? Existing records in that account will be kept.`)) {
+      selected = {
+        loans: mergeById(remote.loans, mergeById(accountCache.loans, guestCache.loans)),
+        splits: mergeById(remote.splits, mergeById(accountCache.splits, guestCache.splits))
+      };
+      shouldSync = true;
+    }
   }
+  if (!selected) {
+    if (hasRows(remote)) selected = remote;
+    else if (hasRows(accountCache)) { selected = accountCache; shouldSync = true; }
+    else selected = { loans: [], splits: [] };
+  }
+  loans = selected.loans; splits = selected.splits; persistLocalRecords();
+  if (shouldSync) await syncToDatabase();
   renderLoans(); renderHistory(); renderDashboard();
 }
 async function finishLogin(user) {
-  currentUser = user; paintAccount(); closeAuth();
-  try { await loadAccountData(); showToast('You’re signed in. Your records are syncing.'); }
+  currentUser = user; ({ loans, splits } = readLocalRecords(user)); paintAccount(); closeAuth();
+  try { await loadAccountData({ offerGuestImport: true }); showToast('You’re signed in. Your records are syncing.'); }
   catch (error) { showToast(error.message); }
 }
 $('#account-button').addEventListener('click', async () => {
   if (!currentUser) { openAuth(appServerAvailable ? '' : 'Open Gather at http://localhost:3000 to use account sign-in and database storage.', !appServerAvailable); return; }
-  try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); currentUser = null; paintAccount(); showToast('You’ve signed out.'); }
+  clearTimeout(remoteSaveTimer); await syncToDatabase();
+  try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); currentUser = null; ({ loans, splits } = readLocalRecords(null)); paintAccount(); renderLoans(); renderHistory(); renderDashboard(); showToast('You’ve signed out.'); }
   catch (error) { showToast(error.message); }
 });
 $('#auth-close').addEventListener('click', closeAuth);
@@ -269,12 +433,15 @@ async function restoreSession() {
   try {
     const state = await api('/api/session');
     appServerAvailable = true; googleAvailable = Boolean(state.googleAvailable);
-    if (state.user) { currentUser = state.user; paintAccount(); await loadAccountData(); }
+    if (state.user) { currentUser = state.user; ({ loans, splits } = readLocalRecords(currentUser)); paintAccount(); await loadAccountData(); }
     else { paintAccount(); }
-    if (!state.googleAvailable) $('#google-login').title = 'Google sign-in needs OAuth credentials in the app .env file.';
-    const phoneAvailable = state.phoneAvailable;
+    $('#google-login').disabled = !state.googleAvailable;
+    if (!state.googleAvailable) $('#google-login').title = 'Google sign-in needs OAuth credentials configured by the app owner.';
+    const phoneAvailable = Boolean(state.phoneAvailable);
     const phoneTab = document.querySelector('[data-method="phone"]');
-    phoneTab.title = phoneAvailable ? 'Sign in with a phone verification code' : 'Phone sign-in needs SMS provider credentials in the app .env file.';
-  } catch { appServerAvailable = false; paintAccount(); }
+    phoneTab.disabled = !phoneAvailable;
+    phoneTab.title = phoneAvailable ? 'Sign in with a phone verification code' : 'Phone sign-in needs SMS provider credentials configured by the app owner.';
+  } catch { appServerAvailable = false; $('#google-login').disabled = true; document.querySelector('[data-method="phone"]').disabled = true; paintAccount(); }
 }
 renderLoans(); renderHistory(); renderDashboard(); setPage('dashboard'); paintAccount(); restoreSession();
+

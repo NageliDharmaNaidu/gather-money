@@ -7,7 +7,8 @@ const { DatabaseSync } = require('node:sqlite');
 const ROOT = __dirname;
 try { process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
 const PORT = Number(process.env.PORT || 3000);
-const DATA_DIR = path.join(ROOT, 'data');
+// On hosted services, point DATA_DIR at the mounted persistent volume.
+const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new DatabaseSync(path.join(DATA_DIR, 'gather.sqlite'));
 db.exec(`
@@ -99,6 +100,7 @@ function displayName(email, phone) { return (email || phone || 'Your account').s
 function publicUser(user) { return { id: user.id, email: user.email, phone: user.phone, displayName: user.display_name }; }
 function authRequired(req, res) { const user = sessionUser(req); if (!user) { sendError(res, 401, 'Please log in to access your saved records.'); return null; } return user; }
 async function handleApi(req, res, url) {
+    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true });
   if (req.method === 'GET' && url.pathname === '/api/session') {
     const user = sessionUser(req); return sendJson(res, 200, { user: user ? publicUser(user) : null, googleAvailable: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), phoneAvailable: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM) });
   }
@@ -206,5 +208,6 @@ const server = http.createServer(async (req, res) => {
   try { const content = fs.readFileSync(filePath); res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)], 'Cache-Control': 'no-cache' }); res.end(content); }
   catch { res.writeHead(404); res.end('Not found'); }
 });
-server.listen(PORT, process.env.HOST || '127.0.0.1', () => console.log(`Gather is running at http://localhost:${PORT}`));
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => console.log(`Gather is listening on port ${PORT}`));
 process.on('SIGINT', () => { db.close(); server.close(() => process.exit(0)); });
+

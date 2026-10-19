@@ -2,6 +2,7 @@ services:
   - type: web
     name: gather-money
     runtime: node
+    region: singapore
     plan: free
     buildCommand: npm install
     startCommand: npm start

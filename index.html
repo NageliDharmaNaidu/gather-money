@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f5">
+  <title>Gather — share money clearly</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#" aria-label="Gather"><span class="brand-mark">g</span>gather</a>
+      <div class="nav-label">YOUR MONEY</div>
+      <nav class="side-nav" aria-label="Main navigation">
+        <button class="nav-item active" data-page="dashboard"><span class="nav-icon">▤</span><span>Dashboard</span></button>
+        <button class="nav-item" data-page="lend"><span class="nav-icon">↗</span><span>Lend person</span><span class="nav-number" id="pending-count">0</span></button>
+        <button class="nav-item" data-page="split"><span class="nav-icon">⌁</span><span>Split bill</span></button>
+        <button class="nav-item business-item" id="business-link"><span class="nav-icon">▦</span><span>Business</span><span class="coming-soon">Coming soon</span></button>
+      </nav>
+      <div class="sidebar-note"><span class="note-icon">✳</span><strong>Keep it easy.</strong><p>Clear records make it simpler to settle up with friends.</p></div>
+      <div class="sidebar-profile"><span class="avatar">Y</span><span><strong>Personal space</strong><small>Your private money list</small></span></div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar"><button class="menu-toggle" id="menu-toggle" aria-label="Open menu">☰</button><div class="breadcrumb"><span>Personal</span><i>/</i><strong id="breadcrumb-page">Dashboard</strong></div><div class="topbar-actions"><span class="top-note" id="save-indicator"><span></span> Saved on this device</span><button id="account-button" class="account-button">Sign in</button></div></header>
+      <div class="page-wrap">
+        <section class="page-heading"><div><div class="eyebrow"><span></span> PERSONAL MONEY</div><h1 id="page-title">Lend person</h1><p id="page-subtitle">Keep a clear note of money you’ve lent and when it happened.</p></div><div class="heading-art" aria-hidden="true"><div class="art-circle"></div><div class="art-note"><span>FRIENDS &amp; MONEY</span><strong>Keep things<br>in the clear.</strong><i>↗</i></div><span class="art-spark">✳</span></div></section>
+
+        <section class="page-view" id="dashboard-view">
+          <div class="dashboard-welcome"><div><span class="welcome-spark">✳</span><div><h2>Your money at a glance</h2><p>Quickly see what’s pending and pick up where you left off.</p></div></div><button class="primary-button" data-go="split">＋ Start a split</button></div>
+          <div class="dashboard-stats"><article class="dash-stat stat-purple"><span>TO COLLECT</span><strong id="dashboard-collect">₹0</strong><small>From lent money and bill splits</small><i>↗</i></article><article class="dash-stat stat-green"><span>PEOPLE TO FOLLOW UP</span><strong id="dashboard-people">0</strong><small>Pending lending records</small><i>◎</i></article><article class="dash-stat stat-orange"><span>GROUP BILLS</span><strong id="dashboard-bills">0</strong><small>Splits you have created</small><i>⌁</i></article></div>
+          <div class="dashboard-columns"><section class="records-card dash-recent"><div class="records-heading"><div><h2>Recent activity</h2><p>Your latest lending records and group bills</p></div><button class="quiet-button" data-go="lend">View lending →</button></div><div id="dashboard-activity" class="record-list"></div></section><aside class="dashboard-quick"><div class="quick-heading"><div class="eyebrow"><span></span> QUICK ACTIONS</div><h2>What do you need?</h2></div><button class="quick-action" data-go="lend"><span class="quick-symbol quick-lend">↗</span><span><strong>Record money lent</strong><small>Add a person, amount, and date.</small></span><b>→</b></button><button class="quick-action" data-go="split"><span class="quick-symbol quick-split">⌁</span><span><strong>Split a group bill</strong><small>Calculate shares and track payments.</small></span><b>→</b></button><div class="quick-tip"><span>✦</span><p>Small notes today make settling up easier tomorrow.</p></div></aside></div>
+        </section>
+        <section class="page-view" id="lend-view" hidden>
+          <div class="form-card">
+            <div class="card-heading"><div class="heading-symbol purple">↗</div><div><h2>Record money lent</h2><p>Add the person, amount, and date and time.</p></div></div>
+            <form id="lend-form">
+              <div class="form-grid">
+                <label class="field">Person’s name<input id="person-name" type="text" maxlength="50" placeholder="Who did you lend money to?" required></label>
+                <label class="field">Amount<div class="amount-wrap"><span>₹</span><input id="lend-amount" type="number" min="0.01" step="0.01" placeholder="0.00" required></div></label>
+                <label class="field full-field">Date and time<input id="lend-datetime" type="datetime-local" required></label>
+              </div>
+              <div class="form-footer"><span class="private-note"><span>⌑</span> Only you can see this record.</span><button class="primary-button" type="submit">Save record <span>→</span></button></div>
+            </form>
+          </div>
+          <section class="records-card"><div class="records-heading"><div><h2>People to follow up with</h2><p>Your lending records</p></div><span class="records-total" id="loan-total">₹0 pending</span></div><div id="loan-records" class="record-list"></div></section>
+        </section>
+
+        <section class="page-view" id="split-view" hidden>
+          <div class="form-card">
+            <div class="card-heading"><div class="heading-symbol green">⌁</div><div><h2>Start a group bill</h2><p>Add the bill total and everyone sharing it. We’ll calculate each person’s share.</p></div></div>
+            <form id="split-form">
+              <div class="form-grid split-top-grid">
+                <label class="field">Bill name<input id="bill-name" type="text" maxlength="60" placeholder="e.g. Dinner at Miso House" required></label>
+                <label class="field">Total bill amount<div class="amount-wrap"><span>₹</span><input id="bill-total" type="number" min="0.01" step="0.01" placeholder="0.00" required></div></label>
+              </div>
+              <div class="receipt-row"><label class="receipt-upload" for="receipt-file"><span class="receipt-icon">▤</span><span><strong>Add a bill or receipt</strong><small>We’ll try to read the total. Please check it before splitting.</small></span><span class="upload-button" id="receipt-label">Upload file</span><input id="receipt-file" type="file" accept="image/*" hidden></label><span class="receipt-status" id="receipt-status"></span></div>
+              <div class="split-divider"></div>
+              <div class="group-heading"><div><h3>Who’s sharing the bill?</h3><p>Enter how many people, then add names if you have them.</p></div><label class="field count-field">Number of people<input id="people-count" type="number" min="1" step="1" value="2" required></label></div>
+              <div class="names-head"><span>PEOPLE IN THIS SPLIT</span><span id="people-count-label">2 people</span></div>
+              <div id="people-inputs" class="people-inputs"></div>
+              <div class="qr-section"><div class="qr-copy"><span class="qr-symbol">▦</span><span><strong>Payment QR <small>Optional</small></strong><small>Add your bank or UPI QR so friends know where to pay.</small></span></div><label class="qr-choose" for="payment-qr"><span id="qr-file-label">Add QR code</span><input id="payment-qr" type="file" accept="image/*" hidden></label></div>
+              <div class="form-footer split-submit"><span class="private-note"><span>⌑</span> Your bill and payment list stay on this device.</span><button class="primary-button" type="submit">Calculate split <span>→</span></button></div>
+            </form>
+          </div>
+
+          <section class="split-result-card" id="split-result-card" hidden>
+            <div class="result-title"><div><div class="eyebrow"><span></span> YOUR GROUP BILL</div><h2 id="result-bill-name">Dinner</h2><p id="result-bill-meta">2 people · equal split</p></div><strong class="result-total" id="result-total">₹0</strong></div>
+            <div class="split-share-banner"><span id="share-label">Each person pays</span><strong id="each-share">₹0</strong><small id="share-remainder"></small></div>
+            <div class="people-paid-head"><div><h3>Payment checklist</h3><p>Mark each person when they’ve paid.</p></div><span class="paid-count" id="paid-count">0 of 2 paid</span></div>
+            <div id="split-people-list" class="split-people-list"></div>
+            <div class="result-bottom"><div id="result-qr-wrap" class="result-qr-wrap"></div><button id="copy-split-summary" class="secondary-button" type="button">Copy split details</button></div>
+          </section>
+          <section class="records-card split-history-card"><div class="records-heading"><div><h2>Previous group bills</h2><p>Your recent splits and payment progress</p></div></div><div id="split-history" class="record-list"></div></section>
+        </section>
+
+        <footer class="page-footer"><span>Gather <i>·</i> Personal</span><span>Money made clearer, together.</span></footer>
+      </div>
+    </main>
+  </div>
+  <div class="auth-shade" id="auth-shade" hidden><section class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button class="modal-x" id="auth-close" aria-label="Close">×</button><a class="brand auth-brand" href="#"><span class="brand-mark">g</span>gather</a><div class="eyebrow"><span></span> YOUR PERSONAL MONEY SPACE</div><h2 id="auth-title">Welcome back.</h2><p class="auth-subtitle" id="auth-subtitle">Sign in to sync your records across devices.</p><div class="auth-tabs"><button class="auth-tab active" data-auth-mode="signin">Log in</button><button class="auth-tab" data-auth-mode="signup">Sign up</button></div><button id="google-login" class="google-button"><span class="google-g">G</span> Continue with Google</button><div class="auth-divider"><span>or use email or phone</span></div><div class="auth-methods"><button class="method-tab active" data-method="email">Email</button><button class="method-tab" data-method="phone">Phone</button></div><form id="email-auth-form" class="auth-form"><label class="field">Email address<input id="auth-email" type="email" placeholder="you@example.com" autocomplete="email" required></label><label class="field">Password<input id="auth-password" type="password" placeholder="At least 8 characters" minlength="8" autocomplete="current-password" required></label><button id="email-submit" class="primary-button auth-submit" type="submit">Log in <span>→</span></button></form><form id="phone-auth-form" class="auth-form" hidden><label class="field">Phone number<input id="auth-phone" type="tel" placeholder="+91 98765 43210" autocomplete="tel"></label><div class="otp-row" id="otp-row" hidden><label class="field">Verification code<input id="auth-otp" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter SMS code"></label><button id="verify-otp" class="primary-button" type="button">Verify</button></div><button id="phone-submit" class="primary-button auth-submit" type="submit">Send verification code <span>→</span></button></form><div class="auth-message" id="auth-message" role="status"></div><p class="auth-footnote">Your records are private to your account. Google and phone sign-in need to be enabled in the connected auth project.</p></section></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal-shade" id="business-modal" hidden><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="business-title"><button class="modal-x" id="modal-close" aria-label="Close">×</button><span class="modal-icon">▦</span><div class="eyebrow"><span></span> COMING SOON</div><h2 id="business-title">Business tools are on the way.</h2><p>For now, Gather is focused on lending records and splitting bills with friends. The business space will be added later.</p><button id="modal-done" class="primary-button">Got it</button></section></div>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
